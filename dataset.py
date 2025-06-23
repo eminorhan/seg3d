@@ -4,43 +4,47 @@ import zarr
 import numpy as np
 import matplotlib.pyplot as plt
 
-def get_random_crop(data_dir: str, crop_size: tuple[int, int, int]) -> np.ndarray | None:
+def get_random_crop(
+    data_dir: str,
+    subdir_name: str,
+    crop_size: tuple[int, int, int],
+    resolution: str = "s0",
+) -> np.ndarray | None:
     """
-    Selects a random experiment from the data directory, opens its Zarr array,
+    Selects a random volume from the data directory, opens its Zarr array,
     and extracts a random 3D crop.
 
-    The expected directory structure for each experiment is:
-    <data_dir>/<experiment_name>/<experiment_name>.zarr/recon-1/em/fibsem-uint8/s0
+    The expected directory structure for each volume is:
+    <data_dir>/<volume_name>/<volume_name>.zarr/recon-1/em/fibsem-uint8/s0
 
     Args:
-        data_dir: The path to the top-level directory containing experiment folders.
+        data_dir: The path to the top-level directory containing volume folders.
         crop_size: A tuple of (depth, height, width) for the desired crop.
+        resolution: Resolution at which to retrieve the data (default: 's0').
 
     Returns:
         A NumPy array containing the cropped data, or None if an error occurs.
     """
-    print(f"Scanning for experiments in: '{data_dir}'")
+    print(f"Scanning for volumes in: '{data_dir}'")
     
     try:
         # Get a list of all subdirectories in the data directory
-        experiments = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
-        if not experiments:
+        volumes = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
+        if not volumes:
             print(f"Error: No subdirectories found in '{data_dir}'.")
             return None
             
-        # 1. Randomly select one of the tissues/experiments
-        selected_experiment = random.choice(experiments)
-        print(f"\nSelected experiment: {selected_experiment}")
+        # 1. Randomly select one of the volumes
+        selected_volume = random.choice(volumes)
+        print(f"\nSelected volume: {selected_volume}")
 
         # Construct the path to the highest resolution Zarr array ('s0')
         # This path is based on the structure you described.
         zarr_path = os.path.join(
             data_dir,
-            selected_experiment,
-            f"{selected_experiment}.zarr",
-            "recon-1",
-            "em",
-            "fibsem-uint8"
+            selected_volume,
+            f"{selected_volume}.zarr",
+            subdir_name
         )
         
         # 2. Open the Zarr array without loading it into memory
@@ -49,15 +53,15 @@ def get_random_crop(data_dir: str, crop_size: tuple[int, int, int]) -> np.ndarra
         # would return an array object directly. This approach is more robust.
         print(f"Opening Zarr store at: {zarr_path}")
         zarr_group = zarr.open(zarr_path, mode='r')
-        print(f"Available datasets: {list(zarr_group.keys())}")
+        print(f"Available resolutions: {list(zarr_group.keys())}")
 
         # Assuming the highest resolution data is at scale 's0'
-        if 's0' not in zarr_group:
-            print(f"Error: Could not find 's0' dataset in '{zarr_path}'.")
-            print(f"Available datasets: {list(zarr_group.keys())}")
+        if resolution not in zarr_group:
+            print(f"Error: Could not find {resolution} dataset in '{zarr_path}'.")
+            print(f"Available resolutions: {list(zarr_group.keys())}")
             return None
             
-        zarr_array = zarr_group['s3']
+        zarr_array = zarr_group[resolution]
         full_shape = zarr_array.shape
         print(f"Full array shape: {full_shape}")
         
@@ -143,11 +147,13 @@ def visualize_crop(crop: np.ndarray, filename: str, num_slices: int = 16):
 if __name__ == '__main__':
     # --- Configuration ---
     # IMPORTANT: Change this to the actual path of your 'data' folder.
-    DATA_DIRECTORY = "/lustre/gale/stf218/scratch/emin/cellmap-segmentation-challenge/data" 
-    CROP_SIZE = (256, 256, 256)
+    DATA_DIR = "/lustre/gale/stf218/scratch/emin/seg3d/data" 
+    SUBDIR_NAME = "recon-1/em/fibsem-int16"
+    CROP_SIZE = (1024, 1024, 1024)
+    RESOLUTION = "s0"
 
     # --- Execution ---
-    random_crop = get_random_crop(DATA_DIRECTORY, CROP_SIZE)
+    random_crop = get_random_crop(DATA_DIR, SUBDIR_NAME, CROP_SIZE, RESOLUTION)
     
     if random_crop is not None:
         print("\n--- Success! ---")

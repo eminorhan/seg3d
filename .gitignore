@@ -1,0 +1,16 @@
+**/__pycache__
+.idea
+.DS_Store
+*.egg-info
+outputs
+logs
+dist/*
+core
+
+# data
+data
+
+# temp files
+*.out
+*.log
+error.json
