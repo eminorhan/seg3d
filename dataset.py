@@ -1,5 +1,6 @@
 import os
 import random
+import time
 import zarr
 import numpy as np
 import matplotlib.pyplot as plt
@@ -19,6 +20,7 @@ def get_random_crop(
 
     Args:
         data_dir: The path to the top-level directory containing volume folders.
+        subdir_name: Subdirectory name containing the EM data.
         crop_size: A tuple of (depth, height, width) for the desired crop.
         resolution: Resolution at which to retrieve the data (default: 's0').
 
@@ -48,8 +50,8 @@ def get_random_crop(
         )
         
         # 2. Open the Zarr array without loading it into memory
-        # We open the group first and then access the 's0' dataset, which is common
-        # for multi-scale data. If 'fibsem-uint8' is the array itself, zarr.open
+        # We open the group first and then access the dataset at the requested resolution. 
+        # If 'fibsem-uint8' is the array itself, zarr.open
         # would return an array object directly. This approach is more robust.
         print(f"Opening Zarr store at: {zarr_path}")
         zarr_group = zarr.open(zarr_path, mode='r')
@@ -104,7 +106,7 @@ def get_random_crop(
         print(f"An unexpected error occurred: {e}")
         return None
 
-def visualize_crop(crop: np.ndarray, filename: str, num_slices: int = 16):
+def visualize_crop(crop: np.ndarray, filename: str, num_slices: int = 36):
     """
     Visualizes a 3D crop by displaying a grid of 2D slices.
 
@@ -113,12 +115,12 @@ def visualize_crop(crop: np.ndarray, filename: str, num_slices: int = 16):
         num_slices: The total number of slices to display in the grid (should be a perfect square).
     """
     depth = crop.shape[0]
-    # Determine the grid size (e.g., 4x4 for 16 slices)
+    # determine the grid size (e.g., 4x4 for 16 slices)
     grid_size = int(np.sqrt(num_slices))
     if grid_size**2 != num_slices:
         print("Warning: num_slices is not a perfect square. Visualization may be incomplete.")
         
-    # Calculate the indices of the slices to show
+    # calculate the indices of the slices to show
     slice_indices = np.linspace(0, depth - 1, num_slices, dtype=int)
     
     fig, axes = plt.subplots(grid_size, grid_size, figsize=(12, 12))
@@ -130,40 +132,41 @@ def visualize_crop(crop: np.ndarray, filename: str, num_slices: int = 16):
         
         ax.imshow(img_slice, cmap='gray', interpolation='nearest')
         ax.set_title(f'Slice: {slice_idx}')
-        ax.axis('off') # Hide axes ticks and labels for a cleaner look
+        ax.axis('off') # hide axes ticks and labels for a cleaner look
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout to make room for suptitle
-    # Save the figure to a file instead of showing it
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    # save figure to a file
     try:
         plt.savefig(filename, bbox_inches='tight')
         print(f"\nVisualization saved to: {filename}")
     except Exception as e:
         print(f"Error saving figure: {e}")
     finally:
-        # Close the figure to free up memory
         plt.close(fig)
 
 
 if __name__ == '__main__':
-    # --- Configuration ---
-    # IMPORTANT: Change this to the actual path of your 'data' folder.
+    # --- configuration ---
     DATA_DIR = "/lustre/gale/stf218/scratch/emin/seg3d/data" 
-    SUBDIR_NAME = "recon-1/em/fibsem-int16"
-    CROP_SIZE = (1024, 1024, 1024)
-    RESOLUTION = "s0"
+    SUBDIR_NAME = "recon-1/em/fibsem-uint8"
+    CROP_SIZE = (256, 256, 256)
+    RESOLUTION = "s4"
+    # --- configuration ---
 
-    # --- Execution ---
+    # --- crop ---
+    s_time = time.time()
     random_crop = get_random_crop(DATA_DIR, SUBDIR_NAME, CROP_SIZE, RESOLUTION)
-    
+    e_time = time.time()
+    print(f"Crop time: {e_time - s_time} seconds")
+
     if random_crop is not None:
         print("\n--- Success! ---")
         print(f"Returned crop shape: {random_crop.shape}")
         print(f"Returned crop data type: {random_crop.dtype}")
-        # You can now work with 'random_crop' as a regular NumPy array
-        # For example, let's check the min and max pixel values
+        # you can now work with 'random_crop' as a regular numpy array
         print(f"Min value in crop: {np.min(random_crop)}")
         print(f"Max value in crop: {np.max(random_crop)}")
 
-        # --- visualize the crop by saving to a PDF ---
+        # --- visualize crop ---
         output_filename = f"example_crop_visualization.jpeg"
         visualize_crop(random_crop, filename=output_filename)
