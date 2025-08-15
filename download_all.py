@@ -6,30 +6,35 @@ import concurrent.futures
 
 # --- Configuration ---
 # The number of downloads to run in parallel.
-# Adjust this value based on your network bandwidth and CPU capabilities.
-# A good starting point is typically between 5 and 10.
-MAX_WORKERS = 144
+MAX_WORKERS = 32
 # --------------------
 
 def download_zarr_archive(item, bucket, root_dir):
-    """
-    The target function for each thread.
-    It contains the logic to download a single Zarr archive.
-    """
-    try:
-        dataset_prefix = item['Prefix']  # e.g., 'jrc_cos7-1a/'
-        dataset_name = dataset_prefix.strip('/')  # e.g., 'jrc_cos7-1a'
-        s3_key = f"{dataset_prefix}{dataset_name}.zarr" # e.g., 'jrc_cos7-1a/jrc_cos7-1a.zarr'
-        local_dest_path = os.path.join(root_dir, dataset_name) # e.g., 'data/jrc_cos7-1a'
+    """The target function for each thread with a manual retry loop."""
+    max_retries = 5
+    dataset_prefix = item['Prefix']
+    dataset_name = dataset_prefix.strip('/')
+    s3_key = f"{dataset_prefix}{dataset_name}.zarr"
+    local_dest_path = os.path.join(root_dir, dataset_name)
 
-        # This is the actual download operation
-        bucket.fetch(s3_key, local_dest_path)
-        
-        # Return a success message for printing later
-        return f"✅ Success:   Downloaded {s3_key}"
-    except Exception as e:
-        # If an error occurs, return a formatted error message
-        return f"❌ Failed:    Could not download {s3_key}. Reason: {e}"
+    for attempt in range(max_retries):
+        try:
+            print(f"-> Attempt {attempt + 1}/{max_retries} for {s3_key}")
+            bucket.fetch(s3_key, local_dest_path)
+            # If fetch succeeds, return the success message and exit the loop
+            return f"✅ Success:   Downloaded {s3_key}"
+        except Exception as e:
+            print(f"   -> Attempt {attempt + 1} failed: {e}")
+            # If this wasn't the last attempt, wait before retrying
+            if attempt < max_retries - 1:
+                wait_time = 2 ** (attempt + 1) # Exponential backoff: 2s, 4s, 8s...
+                print(f"   -> Waiting {wait_time} seconds before retrying...")
+                time.sleep(wait_time)
+            else:
+                # All retries have failed
+                return f"❌ Failed:    Could not download {s3_key} after {max_retries} attempts."
+    return f"❌ Failed:    An unexpected error occurred with {s3_key}." # Should not be reached
+
 
 # --- Main Script ---
 if __name__ == "__main__":
