@@ -4,61 +4,96 @@ import time
 import concurrent.futures
 
 # --- Configuration ---
-MAX_WORKERS = 32
-MAX_DOWNLOAD_ATTEMPTS = 5 # Maximum number of times to try downloading a single dataset
+MAX_WORKERS = 8  # Maximum number of simultaneous downloads
+MAX_DOWNLOAD_ATTEMPTS = 5  # Maximum number of times to try downloading a single dataset
 BUCKET_NAME = 'janelia-cosem-datasets'
 # --------------------
 
 def download_zarr_archive(s3_prefix_path, s3_filesystem, root_dir):
     """
-    The target function for each thread, with a manual retry loop.
+    Downloads a Zarr archive from S3, gracefully resuming if partially downloaded.
+    It verifies file integrity by checking local file sizes against remote ones.
+    
     s3_prefix_path is the full S3 path to the dataset directory,
     e.g., 'janelia-cosem-datasets/jrc_cos7-1a'
     """
     # Extract the dataset name from the end of the prefix path
     dataset_name = s3_prefix_path.split('/')[-1]
 
-    # Construct the full S3 source path for the .zarr archive
+    # Construct the full S3 source path and local destination path
     s3_source_path = f"{s3_prefix_path}/{dataset_name}.zarr"
-
-    # Construct the final local destination path
     local_dest_path = os.path.join(root_dir, dataset_name, f"{dataset_name}.zarr")
 
-    # --- START OF CHANGE ---
-    # First, check if the Zarr archive actually exists before trying to download it.
+    # First, check if the remote Zarr archive actually exists
     if not s3_filesystem.exists(s3_source_path):
         return f"🟡 Skipped:   {s3_source_path} does not exist."
-    # --- END OF CHANGE ---
 
-    # Manual retry loop
+    # --- START OF ROBUST RESUME LOGIC ---
+
+    # 1. Get a list of all remote files with their details (including size).
+    print(f"-> Verifying files for {dataset_name}...")
+    try:
+        # Use detail=True to get file size information
+        remote_file_details = s3_filesystem.find(s3_source_path, detail=True)
+    except Exception as e:
+        return f"❌ Failed:    Could not list files in {s3_source_path}. Error: {e}"
+        
+    remote_files = list(remote_file_details.values())
+    if not remote_files:
+        return f"🟡 Skipped:   No files found in {s3_source_path}."
+
+    # 2. Identify files that are missing or have incorrect sizes.
+    missing_remote_files = []
+    corresponding_local_files = []
+    
+    for remote_f_detail in remote_files:
+        remote_f_path = remote_f_detail['name']
+        remote_f_size = remote_f_detail['size']
+        
+        # Determine the equivalent local path for each remote file
+        relative_path = remote_f_path[len(s3_source_path):].lstrip('/')
+        local_f_path = os.path.join(local_dest_path, relative_path)
+        
+        # Check if the local file exists AND if its size matches the remote file.
+        # This is the key change to handle partially downloaded files.
+        if not os.path.exists(local_f_path) or os.path.getsize(local_f_path) != remote_f_size:
+            missing_remote_files.append(remote_f_path)
+            corresponding_local_files.append(local_f_path)
+    
+    # 3. If no files are missing or corrupted, we're done.
+    if not missing_remote_files:
+        return f"✅ Verified:  All {len(remote_files)} files for {dataset_name} are correct."
+        
+    print(f"-> Found {len(remote_files)} total files for {dataset_name}. "
+          f"Downloading {len(missing_remote_files)} missing or incomplete files...")
+
+    # Ensure all necessary local parent directories exist
+    local_dirs = {os.path.dirname(p) for p in corresponding_local_files}
+    for d in local_dirs:
+        os.makedirs(d, exist_ok=True)
+        
+    # --- END OF ROBUST RESUME LOGIC ---
+
+    # Manual retry loop for downloading the batch of missing files
     for attempt in range(MAX_DOWNLOAD_ATTEMPTS):
         try:
-            print(f"-> Attempt {attempt + 1}/{MAX_DOWNLOAD_ATTEMPTS} for {s3_source_path}")
+            print(f"   -> Attempt {attempt + 1}/{MAX_DOWNLOAD_ATTEMPTS} for {dataset_name}")
 
-            # Create the parent directory for the download if it doesn't exist
-            os.makedirs(os.path.dirname(local_dest_path), exist_ok=True)
+            s3_filesystem.get(missing_remote_files, corresponding_local_files)
 
-            # Perform the recursive download using s3fs.get
-            s3_filesystem.get(s3_source_path, local_dest_path, recursive=True)
-
-            # If the download succeeds, return the success message and exit the loop
-            return f"✅ Success:   Downloaded {s3_source_path}"
+            return f"✅ Success:   Downloaded {len(missing_remote_files)} files for {dataset_name}."
 
         except Exception as e:
             print(f"   -> Attempt {attempt + 1} failed: {e}")
-
-            # If this wasn't the last attempt, wait before retrying
             if attempt < MAX_DOWNLOAD_ATTEMPTS - 1:
-                wait_time = 2 ** (attempt + 1)  # Exponential backoff: 2s, 4s, 8s...
+                wait_time = 2 ** (attempt + 1)
                 print(f"   -> Waiting {wait_time} seconds before retrying...")
                 time.sleep(wait_time)
             else:
-                # All retries have failed, return the final error message
-                return f"❌ Failed:    Could not download {s3_source_path} after {MAX_DOWNLOAD_ATTEMPTS} attempts."
+                return (f"❌ Failed:    Could not download files for {dataset_name} "
+                        f"after {MAX_DOWNLOAD_ATTEMPTS} attempts.")
 
-    # This line should not be reached but is included for completeness
     return f"❌ Failed:    An unexpected error occurred with {s3_source_path}."
-
 
 # --- Main Script ---
 if __name__ == "__main__":

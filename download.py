@@ -6,11 +6,6 @@ import time
 s3_path = 'janelia-cosem-datasets/jrc_cos7-1a/jrc_cos7-1a.zarr'
 local_path = 'data/jrc_cos7-1a/jrc_cos7-1a.zarr' # Download to a directory with this name
 
-# --- hpc best practice ---
-# it's better to specify an absolute path on a scratch file system, e.g.:
-# username = os.environ.get('USER')
-# local_path = f'/scratch/{username}/jrc_cos7-1a.zarr'
-
 def download_zarr_from_s3(s3_path, local_path):
     """
     Downloads a Zarr store from a public S3 bucket.
