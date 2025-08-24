@@ -147,10 +147,10 @@ def visualize_crop(crop: np.ndarray, filename: str, num_slices: int = 36):
 
 if __name__ == '__main__':
     # --- configuration ---
-    DATA_DIR = "/lustre/gale/stf218/scratch/emin/seg3d/data" 
+    DATA_DIR = "data" 
     SUBDIR_NAME = "recon-1/em/fibsem-uint8"
     CROP_SIZE = (256, 256, 256)
-    RESOLUTION = "s4"
+    RESOLUTION = "s0"
     # --- configuration ---
 
     # --- crop ---
