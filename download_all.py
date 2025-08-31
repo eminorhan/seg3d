@@ -4,9 +4,14 @@ import time
 import concurrent.futures
 
 # --- Configuration ---
-MAX_WORKERS = 8  # Maximum number of simultaneous downloads
+MAX_WORKERS = 4  # Maximum number of simultaneous downloads
 MAX_DOWNLOAD_ATTEMPTS = 5  # Maximum number of times to try downloading a single dataset
 BUCKET_NAME = 'janelia-cosem-datasets'
+
+VOLUMES_TO_SKIP = {
+    "jrc_fly-mb-z0419-20",
+    "jrc_fly-larva-1"
+}
 # --------------------
 
 def download_zarr_archive(s3_prefix_path, s3_filesystem, root_dir):
@@ -109,7 +114,9 @@ if __name__ == "__main__":
     try:
         all_objects = s3.ls(BUCKET_NAME, detail=True)
         # Filter the list to include only directories
-        prefix_paths = [obj['name'] for obj in all_objects if obj['type'] == 'directory']
+        all_prefix_paths = [obj['name'] for obj in all_objects if obj['type'] == 'directory']
+        # Filter the list of paths to exclude any volumes in our skip list
+        prefix_paths = [path for path in all_prefix_paths if path.split('/')[-1] not in VOLUMES_TO_SKIP]
         print(f"Found {len(prefix_paths)} total datasets to process.")
         print(f"List of datasets to be downloaded: {prefix_paths}")
     except Exception as e:
