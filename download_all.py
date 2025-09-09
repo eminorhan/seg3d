@@ -4,14 +4,11 @@ import time
 import concurrent.futures
 
 # --- Configuration ---
-MAX_WORKERS = 4  # Maximum number of simultaneous downloads
+MAX_WORKERS = 8  # Maximum number of simultaneous downloads
 MAX_DOWNLOAD_ATTEMPTS = 5  # Maximum number of times to try downloading a single dataset
 BUCKET_NAME = 'janelia-cosem-datasets'
-
-VOLUMES_TO_SKIP = {
-    "jrc_fly-mb-z0419-20",
-    "jrc_fly-larva-1"
-}
+# NEW: Define a file count threshold instead of a manual skip list
+MAX_FILES_THRESHOLD = 10_000_000
 # --------------------
 
 def download_zarr_archive(s3_prefix_path, s3_filesystem, root_dir):
@@ -35,7 +32,7 @@ def download_zarr_archive(s3_prefix_path, s3_filesystem, root_dir):
 
     # --- START OF ROBUST RESUME LOGIC ---
 
-    # 1. Get a list of all remote files with their details (including size).
+    # Get a list of all remote files with their details (including size).
     print(f"-> Verifying files for {dataset_name}...")
     try:
         # Use detail=True to get file size information
@@ -47,7 +44,7 @@ def download_zarr_archive(s3_prefix_path, s3_filesystem, root_dir):
     if not remote_files:
         return f"🟡 Skipped:   No files found in {s3_source_path}."
 
-    # 2. Identify files that are missing or have incorrect sizes.
+    # Identify files that are missing or have incorrect sizes.
     missing_remote_files = []
     corresponding_local_files = []
     
@@ -65,12 +62,11 @@ def download_zarr_archive(s3_prefix_path, s3_filesystem, root_dir):
             missing_remote_files.append(remote_f_path)
             corresponding_local_files.append(local_f_path)
     
-    # 3. If no files are missing or corrupted, we're done.
+    # If no files are missing or corrupted, we're done.
     if not missing_remote_files:
         return f"✅ Verified:  All {len(remote_files)} files for {dataset_name} are correct."
         
-    print(f"-> Found {len(remote_files)} total files for {dataset_name}. "
-          f"Downloading {len(missing_remote_files)} missing or incomplete files...")
+    print(f"-> Found {len(remote_files)} total files for {dataset_name}. Downloading {len(missing_remote_files)} missing or incomplete files...")
 
     # Ensure all necessary local parent directories exist
     local_dirs = {os.path.dirname(p) for p in corresponding_local_files}
@@ -95,8 +91,7 @@ def download_zarr_archive(s3_prefix_path, s3_filesystem, root_dir):
                 print(f"   -> Waiting {wait_time} seconds before retrying...")
                 time.sleep(wait_time)
             else:
-                return (f"❌ Failed:    Could not download files for {dataset_name} "
-                        f"after {MAX_DOWNLOAD_ATTEMPTS} attempts.")
+                return (f"❌ Failed:    Could not download files for {dataset_name} after {MAX_DOWNLOAD_ATTEMPTS} attempts.")
 
     return f"❌ Failed:    An unexpected error occurred with {s3_source_path}."
 
@@ -110,27 +105,52 @@ if __name__ == "__main__":
     os.makedirs(local_root_dir, exist_ok=True)
 
     # 3. List all top-level datasets (directories) using s3fs
-    print(f"Finding datasets in the bucket '{BUCKET_NAME}'...")
+    print(f"Finding all datasets in the bucket '{BUCKET_NAME}'...")
     try:
         all_objects = s3.ls(BUCKET_NAME, detail=True)
         # Filter the list to include only directories
         all_prefix_paths = [obj['name'] for obj in all_objects if obj['type'] == 'directory']
-        # Filter the list of paths to exclude any volumes in our skip list
-        prefix_paths = [path for path in all_prefix_paths if path.split('/')[-1] not in VOLUMES_TO_SKIP]
-        print(f"Found {len(prefix_paths)} total datasets to process.")
-        print(f"List of datasets to be downloaded: {prefix_paths}")
     except Exception as e:
         print(f"Could not list datasets in bucket. Error: {e}")
-        prefix_paths = []
+        all_prefix_paths = []
+
+    # --- NEW: Filter datasets based on file count ---
+    print("\n" + "-" * 50)
+    print(f"Checking datasets against file limit ({MAX_FILES_THRESHOLD:,} files)...")
+    prefix_paths_to_download = []
+    for path in all_prefix_paths:
+        dataset_name = path.split('/')[-1]
+        s3_zarr_path = f"{path}/{dataset_name}.zarr"
+        
+        try:
+            # Check if the .zarr archive exists before counting
+            if not s3.exists(s3_zarr_path):
+                print(f"-> Info:      '{s3_zarr_path}' not found, skipping.")
+                continue
+
+            # Efficiently count the number of files
+            num_files = len(s3.find(s3_zarr_path))
+            
+            if num_files > MAX_FILES_THRESHOLD:
+                print(f"🟡 Skipping:  {dataset_name} ({num_files:,} files > {MAX_FILES_THRESHOLD:,})")
+            else:
+                print(f"✅ Queued:    {dataset_name} ({num_files:,} files)")
+                prefix_paths_to_download.append(path)
+        
+        except Exception as e:
+            print(f"❌ Error checking {dataset_name}: {e}")
+    # -----------------------------------------------
 
     print("-" * 50)
-    print(f"Starting parallel download with up to {MAX_WORKERS} workers...")
+    print(f"Found {len(prefix_paths_to_download)} total datasets to process.")
+    if prefix_paths_to_download:
+        print(f"Starting parallel download with up to {MAX_WORKERS} workers...")
     print("-" * 50)
 
     # 4. Use ThreadPoolExecutor to manage parallel downloads
+    # Use the newly filtered list 'prefix_paths_to_download'
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Pass the s3 filesystem object to each worker thread
-        futures = [executor.submit(download_zarr_archive, path, s3, local_root_dir) for path in prefix_paths]
+        futures = [executor.submit(download_zarr_archive, path, s3, local_root_dir) for path in prefix_paths_to_download]
         for future in concurrent.futures.as_completed(futures):
             status_message = future.result()
             print(status_message)
