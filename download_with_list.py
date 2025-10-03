@@ -5,7 +5,7 @@ import concurrent.futures
 
 # --- Configuration ---
 MAX_WORKERS = 8  # Maximum number of simultaneous downloads
-MAX_DOWNLOAD_ATTEMPTS = 5  # Maximum number of times to try downloading a single dataset
+MAX_DOWNLOAD_ATTEMPTS = 3  # Maximum number of times to try downloading a single dataset
 BUCKET_NAME = 'janelia-cosem-datasets'
 
 BUCKET_0_100K = [
@@ -16,26 +16,33 @@ BUCKET_0_100K = [
     'jrc_mus-nacc-4', 'jrc_mus-pancreas-1', 'jrc_mus-pancreas-3'
     ]  # 21
 
-BUCKET_100K_1M = [
+BUCKET_100K_1M_0 = [
     'aic_desmosome-1', 'aic_desmosome-2', 'aic_desmosome-3', 'jrc_ccl81-covid-1', 'jrc_cos7-11', 'jrc_cos7-1a', 
     'jrc_cos7-1b', 'jrc_ctl-id8-1', 'jrc_ctl-id8-2', 'jrc_ctl-id8-3', 'jrc_ctl-id8-4', 'jrc_ctl-id8-5', 'jrc_fly-vnc-1', 
-    'jrc_hela-2', 'jrc_hela-22', 'jrc_hela-3', 'jrc_hela-4', 'jrc_hela-bfa', 'jrc_hela-nz-1', 'jrc_hela-nz-2', 'jrc_jurkat-1', 
-    'jrc_macrophage-2', 'jrc_mus-choroid-plexus-3', 'jrc_mus-cortex-3', 'jrc_mus-dorsal-striatum-2', 'jrc_mus-granule-neurons-1', 
-    'jrc_mus-granule-neurons-3', 'jrc_mus-hippocampus-2', 'jrc_mus-hippocampus-3', 'jrc_mus-kidney-glomerulus-2', 'jrc_mus-pancreas-2', 
-    'jrc_mus-sc-zp104a', 'jrc_mus-sc-zp105a', 'jrc_sum159-1', 'jrc_sum159-4'
-    ]  # 35
+    'jrc_hela-2', 'jrc_hela-22', 'jrc_hela-3', 'jrc_hela-4', 'jrc_hela-bfa'
+    ]  # 18
+    
+BUCKET_100K_1M_1 = [
+    'jrc_hela-nz-1', 'jrc_hela-nz-2', 'jrc_jurkat-1', 'jrc_macrophage-2', 'jrc_mus-choroid-plexus-3', 'jrc_mus-cortex-3', 'jrc_mus-dorsal-striatum-2', 
+    'jrc_mus-granule-neurons-1', 'jrc_mus-granule-neurons-3', 'jrc_mus-hippocampus-2', 'jrc_mus-hippocampus-3', 'jrc_mus-kidney-glomerulus-2', 
+    'jrc_mus-pancreas-2', 'jrc_mus-sc-zp104a', 'jrc_mus-sc-zp105a', 'jrc_sum159-1', 'jrc_sum159-4'
+    ]  # 17
 
-BUCKET_1M_10M = [
+BUCKET_1M_10M_0 = [
     'jrc_choroid-plexus-2', 'jrc_dauer-larva', 'jrc_fly-acc-calyx-1', 'jrc_fly-fsb-1', 'jrc_fly-mb-1a', 'jrc_hum-airway-14953vc',
-    'jrc_mus-heart-1', 'jrc_mus-hippocampus-1', 'jrc_mus-kidney-2', 'jrc_mus-kidney-3', 'jrc_mus-kidney', 'jrc_mus-liver-2', 'jrc_mus-liver-3', 
-    'jrc_mus-liver-4', 'jrc_mus-liver-5', 'jrc_mus-liver-6', 'jrc_mus-liver-7', 'jrc_mus-liver', 'jrc_mus-meissner-corpuscle-1', 'jrc_mus-pancreas-4', 
-    'jrc_mus-salivary-1', 'jrc_mus-skin-1', 'jrc_mus-thymus-1', 'jrc_ut21-1413-003'
-    ]  # 24
+    'jrc_mus-heart-1', 'jrc_mus-hippocampus-1', 'jrc_mus-kidney-2', 'jrc_mus-kidney-3', 'jrc_mus-kidney', 'jrc_mus-liver-2',
+    ]  # 12 (full)
+
+BUCKET_1M_10M_1 = ['jrc_mus-liver-3', 'jrc_mus-liver-4', 'jrc_mus-liver-5', 'jrc_mus-liver-6', 'jrc_mus-liver-7', 'jrc_mus-liver', 
+    'jrc_mus-meissner-corpuscle-1', 'jrc_mus-pancreas-4', 'jrc_mus-salivary-1', 'jrc_mus-skin-1', 'jrc_mus-thymus-1', 'jrc_ut21-1413-003'
+    ]  # 12 (full)
 
 BUCKET_10M_INF = [
     'jrc_fly-larva-1', 'jrc_fly-mb-z0419-20', 'jrc_mus-guard-hair-follicle', 'jrc_mus-liver-zon-1', 'jrc_mus-liver-zon-2', 
     'jrc_mus-meissner-corpuscle-2', 'jrc_mus-pacinian-corpuscle', 'jrc_zf-cardiac-1'
     ]  # 8
+
+BUCKET_TO_DOWNLOAD = BUCKET_1M_10M_1
 
 def download_zarr_archive(s3_prefix_path, s3_filesystem, root_dir):
     """
@@ -137,7 +144,7 @@ if __name__ == "__main__":
         # Filter the list to include only directories
         all_prefix_paths = [obj['name'] for obj in all_objects if obj['type'] == 'directory']
         # Filter the list of paths to exclude any volumes in our skip list
-        prefix_paths = [path for path in all_prefix_paths if path.split('/')[-1] in BUCKET_0_100K]
+        prefix_paths = [path for path in all_prefix_paths if path.split('/')[-1] in BUCKET_TO_DOWNLOAD]
         print(f"Found {len(prefix_paths)} total datasets to process.")
         print(f"List of datasets to be downloaded: {prefix_paths}")
     except Exception as e:
