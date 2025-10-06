@@ -125,7 +125,7 @@ def visualize_crop(crop: np.ndarray, filename: str, num_slices: int = 36):
 
 if __name__ == '__main__':
     # --- configuration ---
-    ZARR_PATH = "data/jrc_ut21-1413-003/jrc_ut21-1413-003.zarr/recon-1/labels/groundtruth/crop191/cell"
+    ZARR_PATH = "data/jrc_ut21-1413-003/jrc_ut21-1413-003.zarr/recon-1/labels/groundtruth/crop191/all"
     CROP_SIZE = (256, 256, 256)
     RESOLUTION = "s0"
     # --- configuration ---
@@ -143,6 +143,7 @@ if __name__ == '__main__':
         # you can now work with 'random_crop' as a regular numpy array
         print(f"Min value in crop: {np.min(random_crop)}")
         print(f"Max value in crop: {np.max(random_crop)}")
+        print(f"Unique values: {np.unique(random_crop)}")
 
         # --- visualize crop ---
         output_filename = f"example_crop_label_visualization.jpeg"
