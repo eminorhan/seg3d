@@ -1,9 +1,9 @@
 import os
 import zarr
 import numpy as np
+import matplotlib.pyplot as plt
 from glob import glob
 import scipy.ndimage
-
 
 class ZarrSegmentationDataset:
     """
@@ -79,7 +79,6 @@ class ZarrSegmentationDataset:
                             'raw_path_group': raw_group_path_str,
                             'label_path': label_path_str
                         })
-
         return samples
 
     def __len__(self):
@@ -106,7 +105,7 @@ class ZarrSegmentationDataset:
             pass # We will handle the error outside this function
         
         return None, None
-    
+
     def _find_best_raw_scale(self, target_label_scale, raw_attrs):
         """
         Finds the best raw scale level to use based on the target label scale.
@@ -149,42 +148,31 @@ class ZarrSegmentationDataset:
         """
         Fetches a single raw crop and its corresponding segmentation mask, both at a fixed output size.
         """
-        sample_info = self.samples[idx]        
-        zarr_root = zarr.open(sample_info['zarr_path'], mode='r')
+        sample_info = self.samples[idx]
+        zarr_path = sample_info['zarr_path']
+        
+        zarr_root = zarr.open(zarr_path, mode='r')
+        
         label_array = zarr_root[sample_info['label_path']]
 
-        # Parse label metadata
+        # --- Parse Label Metadata ---
         label_attrs_group_path = os.path.dirname(sample_info['label_path'])
         label_attrs = zarr_root[label_attrs_group_path].attrs.asdict()
         label_scale_name = os.path.basename(sample_info['label_path'])
         label_scale, label_translation = self._parse_ome_ngff_metadata(label_attrs, label_scale_name)
         if label_scale is None:
              raise ValueError(f"Could not parse required OME-NGFF metadata from {label_attrs_group_path}")
-        
+
         print(f"Zarr path: {sample_info['zarr_path']}")
         print(f"Label path: {sample_info['label_path']}, Label scale: {label_scale}, Label translation: {label_translation}")
-    
-        # Dynamically find the best raw scale based on the ORIGINAL label scale
-        raw_group_path = sample_info['raw_path_group']
-        raw_attrs = zarr_root[raw_group_path].attrs.asdict()
-        best_raw_scale_path, raw_scale, raw_translation = self._find_best_raw_scale(label_scale, raw_attrs)
-        print(f"Raw scale to retrieve: {raw_scale}")
-
-        if raw_scale is None: # Fallback if metadata parsing failed in helper
-             _, raw_scale, raw_translation = self._parse_ome_ngff_metadata(raw_attrs, best_raw_scale_path)
-             if raw_scale is None:
-                 print(f"Warning: Could not parse metadata for raw volume. Assuming scale=[1,1,1] and translation=[0,0,0].")
-                 raw_scale, raw_translation = [1.0, 1.0, 1.0], [0.0, 0.0, 0.0]
         
         original_shape = label_array.shape
         target_shape = self.output_size
 
-        print(f"Original shape: {original_shape}")
-        print(f"Target shape: {target_shape}")
-
-        # ====== Adjust the label mask to the target output size ======
+        # --- Adjust the label mask to the target output size ---
         # Case 1: The original label mask is larger than the target size, so we take a random crop.
         if all(os >= ts for os, ts in zip(original_shape, target_shape)):
+            print(f"Cropping...")
             start_z = np.random.randint(0, original_shape[0] - target_shape[0] + 1)
             start_y = np.random.randint(0, original_shape[1] - target_shape[1] + 1)
             start_x = np.random.randint(0, original_shape[2] - target_shape[2] + 1)
@@ -199,10 +187,9 @@ class ZarrSegmentationDataset:
         
         # Case 2: The label mask is smaller (or mixed), so we must resample it.
         else:
+            print(f"Resampling...")
             label_data = label_array[:]
             zoom_factor = [t / s for t, s in zip(target_shape, original_shape)]
-            print(f"Zoom factor: {zoom_factor}")
-
             # Use order=0 for nearest-neighbor interpolation to preserve integer labels
             resampled_label_mask = scipy.ndimage.zoom(label_data, zoom_factor, order=0, prefilter=False)
             
@@ -214,7 +201,19 @@ class ZarrSegmentationDataset:
             original_physical_size = [sh * sc for sh, sc in zip(original_shape, label_scale)]
             adjusted_label_scale = [ps / ts for ps, ts in zip(original_physical_size, target_shape)]
             
-        # Now fetch the corresponding raw data using the optimal raw scale
+        # --- Dynamically find the best raw scale and get its metadata ---
+        raw_group_path = sample_info['raw_path_group']
+        raw_attrs = zarr_root[raw_group_path].attrs.asdict()
+        best_raw_scale_path, raw_scale, raw_translation = self._find_best_raw_scale(adjusted_label_scale, raw_attrs)
+        print(f"Raw scale to retrieve: {raw_scale}")
+
+        if raw_scale is None: # Fallback if metadata parsing failed in helper
+             _, raw_scale, raw_translation = self._parse_ome_ngff_metadata(raw_attrs, best_raw_scale_path)
+             if raw_scale is None:
+                 print(f"Warning: Could not parse metadata for raw volume. Assuming scale=[1,1,1] and translation=[0,0,0].")
+                 raw_scale, raw_translation = [1.0, 1.0, 1.0], [0.0, 0.0, 0.0]
+
+        # --- Now fetch the corresponding raw data using the optimal raw scale ---
         best_raw_array_path = os.path.join(raw_group_path, best_raw_scale_path)
         raw_array = zarr_root[best_raw_array_path]
 
@@ -225,12 +224,14 @@ class ZarrSegmentationDataset:
         is_downsampling_or_equal = all(r >= 0.999 for r in scale_ratio)
 
         if is_downsampling_or_equal:
+            print(f"Downsamplign...")
             step = [int(round(r)) for r in scale_ratio]
             step = [max(1, s) for s in step]
             end_voxels_raw = [st + (dim * sp) for st, dim, sp in zip(start_voxels_raw, target_shape, step)]
             slicing = tuple(slice(st, en, sp) for st, en, sp in zip(start_voxels_raw, end_voxels_raw, step))
             raw_crop_from_zarr = raw_array[slicing]
         else:
+            print(f"Upsampling...")
             label_physical_size = [sh * sc for sh, sc in zip(target_shape, adjusted_label_scale)]
             relative_end_physical = [s + size for s, size in zip(relative_start_physical, label_physical_size)]
             end_voxels_raw = [int(round(p / s)) for p, s in zip(relative_end_physical, raw_scale)]
@@ -258,19 +259,18 @@ if __name__ == '__main__':
     # Initialize the dataset with the root directory containing the datasets.
     dataset = ZarrSegmentationDataset(root_dir=DATA_DIR)
 
-    # print(f"Found {len(dataset)} samples.")
-    # for i in range(len(dataset)):
-    #     # Get the first sample
-    #     print(f"Sample {i}")
-    #     raw_image_crop, label_mask_crop = dataset[i]
-    #     print(f"Raw image crop shape: {raw_image_crop.shape}")
-    #     print(f"Label mask crop shape: {label_mask_crop.shape}")
-    #     print(f"Unique labels: {np.unique(label_mask_crop)}")
+    print(f"Found {len(dataset)} samples.")
+    for i in range(len(dataset)):
+        # Get the first sample
+        print(f"Sample {i}")
+        raw_image_crop, label_mask_crop = dataset[i]
+        print(f"Raw image crop shape: {raw_image_crop.shape}")
+        print(f"Label mask crop shape: {label_mask_crop.shape}")
+        print(f"Unique labels: {np.unique(label_mask_crop)}")
 
     print("\nFetching the first sample...")
     # Get the first sample
-    crop_idx = 250
-    raw_image_crop, label_mask_crop = dataset[crop_idx]
+    raw_image_crop, label_mask_crop = dataset[0]
 
     print(f"Raw image crop shape: {raw_image_crop.shape}")
     print(f"Label mask crop shape: {label_mask_crop.shape}")
@@ -280,31 +280,27 @@ if __name__ == '__main__':
     assert raw_image_crop.shape == label_mask_crop.shape
     print("\nSuccessfully loaded a sample and shapes match!")
 
-    # ====== visualization check ======
-    import matplotlib.pyplot as plt
+    # --- Visualization Test ---
+    print("\nRunning visualization test...")
+        
+    num_slices_to_show = 4  # Ensure the crop has enough depth to display
+    fig, axes = plt.subplots(num_slices_to_show, 2, figsize=(10, 2 * num_slices_to_show))
+    fig.suptitle('Visual Correspondence Check', fontsize=16)
 
-    num_slices_to_show = 36
-    fig, axes = plt.subplots(int(np.sqrt(num_slices_to_show)), int(np.sqrt(num_slices_to_show)), figsize=(20, 20))
-    fig.suptitle(f"Crop index: {crop_idx}", fontsize=16)
+    # Select evenly spaced slice indices from the z-axis
     slice_indices = np.linspace(0, raw_image_crop.shape[0] - 1, num_slices_to_show, dtype=int)
 
-    # flatten array for easy iteration
-    axes = axes.flatten()
-
-    vmin, vmax = 0, np.max(label_mask_crop)
-
     for i, slice_idx in enumerate(slice_indices):
-        ax = axes[i]
-        # Display the raw image slice
-        ax.imshow(raw_image_crop[slice_idx, :, :], cmap='gray')
-        
-        # Overlay the label mask, use masked array to make the background (label 0) transparent
-        masked_labels = np.ma.masked_where(label_mask_crop[slice_idx, :, :] == 0, label_mask_crop[slice_idx, :, :])
-        ax.imshow(masked_labels, cmap='gist_ncar', alpha=0.1, interpolation='none', vmin=vmin, vmax=vmax)
-        
-        ax.set_title(f'Slice Z={slice_idx}')
-        ax.axis('off')
+        # Plot raw image slice
+        axes[i, 0].imshow(raw_image_crop[slice_idx, :, :], cmap='gray')
+        axes[i, 0].set_title(f'Raw Slice (Z={slice_idx})')
+        axes[i, 0].axis('off')
+
+        # Plot label mask slice
+        axes[i, 1].imshow(label_mask_crop[slice_idx, :, :])
+        axes[i, 1].set_title(f'Label Mask (Z={slice_idx})')
+        axes[i, 1].axis('off')
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig(f"raw_labeled_crop_{crop_idx}.jpeg", bbox_inches='tight')
+    plt.savefig("raw_labeled_crops.jpeg", bbox_inches='tight')
     print("Figure successfully saved.")
