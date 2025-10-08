@@ -13,15 +13,14 @@ class ZarrSegmentationDataset:
     and their corresponding labeled segmentation crops. It returns fixed-size
     crops suitable for training deep learning models.
     """
-
     def __init__(self, root_dir, raw_scale='s0', labels_scale='s0', output_size=(512, 512, 512)):
         """
         Initializes the dataset by scanning for valid data samples.
 
         Args:
             root_dir (str): The path to the root directory containing the Zarr datasets.
-            raw_scale (str, optional): The default highest-resolution scale for raw data. Defaults to 's0'.
-            labels_scale (str, optional): The scale level to use for the labels. Defaults to 's0'.
+            raw_scale (str, optional): Resolution for raw data. Defaults to 's0' (highest resolution).
+            labels_scale (str, optional): Resolution for labels. Defaults to 's0' (highest resolution).
             output_size (tuple, optional): The desired (Z, Y, X) output size of the raw and label crops. Defaults to (512, 512, 512).
         """
         if scipy is None:
@@ -250,10 +249,167 @@ class ZarrSegmentationDataset:
         return final_raw_crop, final_label_mask
 
 
+class ZarrSegmentationDataset2D(ZarrSegmentationDataset):
+    """
+    A dataloader that provides 2D slices by directly slicing the Zarr store.
+
+    This class treats the entire collection of 2D slices across all 3D volumes
+    as one large dataset, enabling efficient, direct loading of 2D data without
+    loading intermediate 3D chunks.
+    """
+    def __init__(self, root_dir, raw_scale='s0', labels_scale='s0', output_size=(512, 512)):
+        """
+        Initializes the 2D dataloader.
+
+        Args:
+            root_dir (str): The path to the root directory containing the Zarr datasets.
+            raw_scale (str, optional): The default highest-resolution scale for raw data.
+            labels_scale (str, optional): The scale level to use for the labels.
+            output_size (tuple, optional): The desired (H, W) output size for the 2D slices.
+        """
+        super().__init__(root_dir, raw_scale, labels_scale)
+        self.output_size = output_size
+        self._build_slice_map()
+
+    def _build_slice_map(self):
+        """
+        Scans all 3D volumes and builds a map of all possible 2D slices.
+        This allows __len__ and __getitem__ to work on a virtual dataset of 2D slices.
+        """
+        print("Building 2D slice map... (This may take a moment for large datasets)")
+        self.slice_map = []
+        self.cumulative_slices = [0]
+        total_slices = 0
+
+        for sample_info in self.samples:
+            zarr_root = zarr.open(sample_info['zarr_path'], mode='r')
+            label_array = zarr_root[sample_info['label_path']]
+            shape = label_array.shape
+            
+            # Add slices for Z, Y, and X axes
+            for axis, num_slices in enumerate(shape):
+                self.slice_map.append({'sample_info': sample_info, 'axis': axis})
+                total_slices += num_slices
+                self.cumulative_slices.append(total_slices)
+        
+        self.total_slices = total_slices
+        print(f"Slice map built. Total 2D slices found: {self.total_slices}")
+
+    def __len__(self):
+        """Returns the total number of 2D slices available across all volumes."""
+        return self.total_slices
+
+    def __getitem__(self, idx):
+        """
+        Fetches a specific 2D slice by its global index, loading it directly from the Zarr store.
+        """
+        if not 0 <= idx < self.total_slices:
+            raise IndexError("Index out of range")
+
+        # Find which volume and axis this global index corresponds to
+        map_idx = np.searchsorted(self.cumulative_slices, idx, side='right') - 1
+        slice_info = self.slice_map[map_idx]
+        local_slice_idx = idx - self.cumulative_slices[map_idx]
+
+        sample_info = slice_info['sample_info']
+        axis = slice_info['axis']
+
+        # Get label slice and metadata
+        zarr_root = zarr.open(sample_info['zarr_path'], mode='r')
+        label_array_3d = zarr_root[sample_info['label_path']]
+        
+        slicing_3d = [slice(None)] * 3
+        slicing_3d[axis] = local_slice_idx
+        label_slice_2d = label_array_3d[tuple(slicing_3d)]
+
+        label_attrs_group_path = os.path.dirname(sample_info['label_path'])
+        label_attrs = zarr_root[label_attrs_group_path].attrs.asdict()
+        label_scale_name = os.path.basename(sample_info['label_path'])
+        label_scale_3d, label_translation_3d = self._parse_ome_ngff_metadata(label_attrs, label_scale_name)
+
+        # Adjust label slice to output_size (crop or resample)
+        original_shape_2d = label_slice_2d.shape
+        target_shape_2d = self.output_size
+        print(f"Original shape: {original_shape_2d}; target shape: {target_shape_2d}")
+
+        if all(os >= ts for os, ts in zip(original_shape_2d, target_shape_2d)):
+            print(f"Cropping...")
+            start_h = np.random.randint(0, original_shape_2d[0] - target_shape_2d[0] + 1)
+            start_w = np.random.randint(0, original_shape_2d[1] - target_shape_2d[1] + 1)
+            final_label_slice = label_slice_2d[start_h:start_h+target_shape_2d[0], start_w:start_w+target_shape_2d[1]]
+            
+            # Adjust metadata for the crop
+            axes_2d = [i for i in range(3) if i != axis]
+            offset_physical = [start_h * label_scale_3d[axes_2d[0]], start_w * label_scale_3d[axes_2d[1]]]
+            adjusted_label_translation_2d = [label_translation_3d[axes_2d[0]] + offset_physical[0], label_translation_3d[axes_2d[1]] + offset_physical[1]]
+            adjusted_label_scale_2d = [label_scale_3d[axes_2d[0]], label_scale_3d[axes_2d[1]]]
+        else:
+            print(f"Resampling...")
+            zoom_factor = [t / s for t, s in zip(target_shape_2d, original_shape_2d)]
+            final_label_slice = scipy.ndimage.zoom(label_slice_2d, zoom_factor, order=0, prefilter=False)
+            
+            # Adjust metadata for the resampling
+            axes_2d = [i for i in range(3) if i != axis]
+            adjusted_label_translation_2d = [label_translation_3d[axes_2d[0]], label_translation_3d[axes_2d[1]]]
+            original_physical_size_2d = [sh * sc for sh, sc in zip(original_shape_2d, [label_scale_3d[d] for d in axes_2d])]
+            adjusted_label_scale_2d = [ps / ts for ps, ts in zip(original_physical_size_2d, target_shape_2d)]
+
+        # Find best raw scale
+        raw_group_path = sample_info['raw_path_group']
+        raw_attrs = zarr_root[raw_group_path].attrs.asdict()
+        
+        # We need a 3D target scale to compare with the raw scales
+        temp_target_label_scale_3d = [0,0,0]
+        axes_2d = [i for i in range(3) if i != axis]
+        temp_target_label_scale_3d[axes_2d[0]] = adjusted_label_scale_2d[0]
+        temp_target_label_scale_3d[axes_2d[1]] = adjusted_label_scale_2d[1]
+        temp_target_label_scale_3d[axis] = label_scale_3d[axis] # thickness of the slice
+
+        best_raw_scale_path, raw_scale_3d, raw_translation_3d = self._find_best_raw_scale(temp_target_label_scale_3d, raw_attrs)
+        
+        # Calculate raw slice coordinates
+        raw_array_3d = zarr_root[os.path.join(raw_group_path, best_raw_scale_path)]
+        
+        # Construct 3D physical coordinates for the 2D plane
+        phys_start_3d = [0,0,0]
+        phys_start_3d[axes_2d[0]] = adjusted_label_translation_2d[0]
+        phys_start_3d[axes_2d[1]] = adjusted_label_translation_2d[1]
+        phys_start_3d[axis] = label_translation_3d[axis] + local_slice_idx * label_scale_3d[axis]
+        
+        # Convert to raw voxel coordinates
+        relative_phys_start_3d = [ps - rt for ps, rt in zip(phys_start_3d, raw_translation_3d)]
+        start_voxels_raw_3d = [int(round(p / s)) for p, s in zip(relative_phys_start_3d, raw_scale_3d)]
+
+        # Determine the size of the slice in raw voxels
+        size_in_phys_2d = [sh * sc for sh, sc in zip(target_shape_2d, adjusted_label_scale_2d)]
+        size_in_raw_voxels_2d = [int(round(p / s)) for p, s in zip(size_in_phys_2d, [raw_scale_3d[d] for d in axes_2d])]
+        
+        # Construct the final 3D slice for the raw array
+        raw_slicing = [0,0,0]
+        raw_slicing[axes_2d[0]] = slice(start_voxels_raw_3d[axes_2d[0]], start_voxels_raw_3d[axes_2d[0]] + size_in_raw_voxels_2d[0])
+        raw_slicing[axes_2d[1]] = slice(start_voxels_raw_3d[axes_2d[1]], start_voxels_raw_3d[axes_2d[1]] + size_in_raw_voxels_2d[1])
+        raw_slicing[axis] = start_voxels_raw_3d[axis]
+
+        raw_slice_2d = raw_array_3d[tuple(raw_slicing)]
+
+        # Final resampling of raw slice
+        if raw_slice_2d.shape != target_shape_2d:
+             if any(s == 0 for s in raw_slice_2d.shape):
+                 final_raw_slice = np.zeros(target_shape_2d, dtype=raw_array_3d.dtype)
+             else:
+                zoom_factor = [t / s for t, s in zip(target_shape_2d, raw_slice_2d.shape)]
+                final_raw_slice = scipy.ndimage.zoom(raw_slice_2d, zoom_factor, order=1, prefilter=False)
+        else:
+            final_raw_slice = raw_slice_2d
+
+        return final_raw_slice, final_label_slice
+
+
 if __name__ == '__main__':
     
     DATA_DIR = '/lustre/gale/stf218/scratch/emin/cellmap-segmentation-challenge_old/data'
 
+    # ====== Test 3D dataset class ======
     print("\nInitializing ZarrSegmentationDataset...")
     # Initialize the dataset with the root directory containing the datasets.
     dataset = ZarrSegmentationDataset(root_dir=DATA_DIR)
@@ -269,7 +425,7 @@ if __name__ == '__main__':
 
     print("\nFetching the first sample...")
     # Get the first sample
-    crop_idx = 250
+    crop_idx = 0
     raw_image_crop, label_mask_crop = dataset[crop_idx]
 
     print(f"Raw image crop shape: {raw_image_crop.shape}")
@@ -308,3 +464,39 @@ if __name__ == '__main__':
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.savefig(f"raw_labeled_crop_{crop_idx}.jpeg", bbox_inches='tight')
     print("Figure successfully saved.")
+
+    # # ====== Test 2D dataset class ======
+    # print("\nInitializing ZarrSegmentationDataset2D...")
+    # fixed_output_size_2d = (512, 512)
+    # dataset_2d = ZarrSegmentationDataset2D(root_dir=DATA_DIR, output_size=fixed_output_size_2d)
+
+    # print(f"Total 2D slices available: {len(dataset_2d)}")
+    # # Fetch a slice to test
+    # random_slice_idx = 0  #np.random.randint(0, len(dataset_2d))
+    # print(f"Fetching random slice index {random_slice_idx}...")
+    # raw_slice, label_slice = dataset_2d[random_slice_idx]
+    # print(f"Final Raw 2D Shape: {raw_slice.shape}")
+    # print(f"Final Label 2D Shape: {label_slice.shape}")
+
+    # assert raw_slice.shape == fixed_output_size_2d
+    # assert label_slice.shape == fixed_output_size_2d
+    # print("2D shapes match the target output size correctly.")
+
+    # # # ====== visualization check ======
+    # import matplotlib.pyplot as plt
+    # fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    # fig.suptitle('Visual Correspondence Check (2D Direct Slice)', fontsize=16)
+    
+    # # Display the raw image slice
+    # ax.imshow(raw_slice, cmap='gray')
+    
+    # # Overlay the label mask
+    # masked_labels = np.ma.masked_where(label_slice == 0, label_slice)
+    # ax.imshow(masked_labels, cmap='gist_ncar', alpha=0.1, interpolation='none')
+    
+    # ax.set_title('Random 2D Slice with Overlay')
+    # ax.axis('off')
+
+    # plt.tight_layout(rect=[0, 0, 1, 0.96])
+    # plt.savefig(f"raw_labeled_crop_2D_{random_slice_idx}.jpeg", bbox_inches='tight')
+    # print("Figure successfully saved.")
