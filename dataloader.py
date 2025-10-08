@@ -409,94 +409,96 @@ if __name__ == '__main__':
     
     DATA_DIR = '/lustre/gale/stf218/scratch/emin/cellmap-segmentation-challenge_old/data'
 
-    # ====== Test 3D dataset class ======
-    print("\nInitializing ZarrSegmentationDataset...")
-    # Initialize the dataset with the root directory containing the datasets.
-    dataset = ZarrSegmentationDataset(root_dir=DATA_DIR)
+    # # ====== Test 3D dataset class ======
+    # print("\nInitializing ZarrSegmentationDataset...")
+    # # Initialize the dataset with the root directory containing the datasets.
+    # dataset = ZarrSegmentationDataset(root_dir=DATA_DIR)
 
-    # print(f"Found {len(dataset)} samples.")
-    # for i in range(len(dataset)):
-    #     # Get the first sample
-    #     print(f"Sample {i}")
-    #     raw_image_crop, label_mask_crop = dataset[i]
-    #     print(f"Raw image crop shape: {raw_image_crop.shape}")
-    #     print(f"Label mask crop shape: {label_mask_crop.shape}")
-    #     print(f"Unique labels: {np.unique(label_mask_crop)}")
+    # # print(f"Found {len(dataset)} samples.")
+    # # for i in range(len(dataset)):
+    # #     # Get the first sample
+    # #     print(f"Sample {i}")
+    # #     raw_image_crop, label_mask_crop = dataset[i]
+    # #     print(f"Raw image crop shape: {raw_image_crop.shape}")
+    # #     print(f"Label mask crop shape: {label_mask_crop.shape}")
+    # #     print(f"Unique labels: {np.unique(label_mask_crop)}")
 
-    print("\nFetching the first sample...")
-    # Get the first sample
-    crop_idx = 0
-    raw_image_crop, label_mask_crop = dataset[crop_idx]
+    # print("\nFetching the first sample...")
+    # # Get the first sample
+    # crop_idx = 0
+    # raw_image_crop, label_mask_crop = dataset[crop_idx]
 
-    print(f"Raw image crop shape: {raw_image_crop.shape}")
-    print(f"Label mask crop shape: {label_mask_crop.shape}")
-    print(f"Unique labels: {np.unique(label_mask_crop)}")
+    # print(f"Raw image crop shape: {raw_image_crop.shape}")
+    # print(f"Label mask crop shape: {label_mask_crop.shape}")
+    # print(f"Unique labels: {np.unique(label_mask_crop)}")
 
-    # Verify the shapes match
-    assert raw_image_crop.shape == label_mask_crop.shape
-    print("\nSuccessfully loaded a sample and shapes match!")
+    # # Verify the shapes match
+    # assert raw_image_crop.shape == label_mask_crop.shape
+    # print("\nSuccessfully loaded a sample and shapes match!")
 
-    # ====== visualization check ======
-    import matplotlib.pyplot as plt
-
-    num_slices_to_show = 36
-    fig, axes = plt.subplots(int(np.sqrt(num_slices_to_show)), int(np.sqrt(num_slices_to_show)), figsize=(20, 20))
-    fig.suptitle(f"Crop index: {crop_idx}", fontsize=16)
-    slice_indices = np.linspace(0, raw_image_crop.shape[0] - 1, num_slices_to_show, dtype=int)
-
-    # flatten array for easy iteration
-    axes = axes.flatten()
-
-    vmin, vmax = 0, np.max(label_mask_crop)
-
-    for i, slice_idx in enumerate(slice_indices):
-        ax = axes[i]
-        # Display the raw image slice
-        ax.imshow(raw_image_crop[slice_idx, :, :], cmap='gray')
-        
-        # Overlay the label mask, use masked array to make the background (label 0) transparent
-        masked_labels = np.ma.masked_where(label_mask_crop[slice_idx, :, :] == 0, label_mask_crop[slice_idx, :, :])
-        ax.imshow(masked_labels, cmap='gist_ncar', alpha=0.1, interpolation='none', vmin=vmin, vmax=vmax)
-        
-        ax.set_title(f'Slice Z={slice_idx}')
-        ax.axis('off')
-
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig(f"raw_labeled_crop_{crop_idx}.jpeg", bbox_inches='tight')
-    print("Figure successfully saved.")
-
-    # # ====== Test 2D dataset class ======
-    # print("\nInitializing ZarrSegmentationDataset2D...")
-    # fixed_output_size_2d = (512, 512)
-    # dataset_2d = ZarrSegmentationDataset2D(root_dir=DATA_DIR, output_size=fixed_output_size_2d)
-
-    # print(f"Total 2D slices available: {len(dataset_2d)}")
-    # # Fetch a slice to test
-    # random_slice_idx = 0  #np.random.randint(0, len(dataset_2d))
-    # print(f"Fetching random slice index {random_slice_idx}...")
-    # raw_slice, label_slice = dataset_2d[random_slice_idx]
-    # print(f"Final Raw 2D Shape: {raw_slice.shape}")
-    # print(f"Final Label 2D Shape: {label_slice.shape}")
-
-    # assert raw_slice.shape == fixed_output_size_2d
-    # assert label_slice.shape == fixed_output_size_2d
-    # print("2D shapes match the target output size correctly.")
-
-    # # # ====== visualization check ======
+    # Visualization check
     # import matplotlib.pyplot as plt
-    # fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-    # fig.suptitle('Visual Correspondence Check (2D Direct Slice)', fontsize=16)
-    
-    # # Display the raw image slice
-    # ax.imshow(raw_slice, cmap='gray')
-    
-    # # Overlay the label mask
-    # masked_labels = np.ma.masked_where(label_slice == 0, label_slice)
-    # ax.imshow(masked_labels, cmap='gist_ncar', alpha=0.1, interpolation='none')
-    
-    # ax.set_title('Random 2D Slice with Overlay')
-    # ax.axis('off')
+
+    # num_slices_to_show = 36
+    # fig, axes = plt.subplots(int(np.sqrt(num_slices_to_show)), int(np.sqrt(num_slices_to_show)), figsize=(20, 20))
+    # fig.suptitle(f"Crop index: {crop_idx}", fontsize=16)
+    # slice_indices = np.linspace(0, raw_image_crop.shape[0] - 1, num_slices_to_show, dtype=int)
+
+    # # flatten array for easy iteration
+    # axes = axes.flatten()
+
+    # vmin, vmax = 0, np.max(label_mask_crop)
+
+    # for i, slice_idx in enumerate(slice_indices):
+    #     ax = axes[i]
+    #     # Display the raw image slice
+    #     ax.imshow(raw_image_crop[slice_idx, :, :], cmap='gray')
+        
+    #     # Overlay the label mask, use masked array to make the background (label 0) transparent
+    #     masked_labels = np.ma.masked_where(label_mask_crop[slice_idx, :, :] == 0, label_mask_crop[slice_idx, :, :])
+    #     ax.imshow(masked_labels, cmap='gist_ncar', alpha=0.1, interpolation='none', vmin=vmin, vmax=vmax)
+        
+    #     ax.set_title(f'Slice Z={slice_idx}')
+    #     ax.axis('off')
 
     # plt.tight_layout(rect=[0, 0, 1, 0.96])
-    # plt.savefig(f"raw_labeled_crop_2D_{random_slice_idx}.jpeg", bbox_inches='tight')
+    # plt.savefig(f"raw_labeled_crop_{crop_idx}.jpeg", bbox_inches='tight')
     # print("Figure successfully saved.")
+
+    # # ====== Test 2D dataset class ======
+    print("\nInitializing ZarrSegmentationDataset2D...")
+    fixed_output_size_2d = (1024, 1024)
+    dataset_2d = ZarrSegmentationDataset2D(root_dir=DATA_DIR, output_size=fixed_output_size_2d)
+
+    # Visualization check
+    import matplotlib.pyplot as plt
+    num_slices_to_show = 100
+    n_cols = int(np.ceil(np.sqrt(num_slices_to_show)))
+    n_rows = int(np.ceil(num_slices_to_show / n_cols))
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, n_rows * 3))
+    
+    # Get regularly spaced indices from the entire 2D dataset
+    slice_indices = np.linspace(0, len(dataset_2d) - 1, num_slices_to_show, dtype=int)
+
+    for i, slice_idx in enumerate(slice_indices):
+        ax = axes.flat[i]
+        raw_slice, label_slice = dataset_2d[slice_idx]
+        
+        # Display the raw image slice
+        ax.imshow(raw_slice, cmap='gray')
+        
+        # Overlay the label mask
+        masked_labels = np.ma.masked_where(label_slice == 0, label_slice)
+        ax.imshow(masked_labels, cmap='gist_ncar', alpha=0.1, interpolation='none')
+        
+        ax.set_title(f'Slice index: {slice_idx}')
+        ax.axis('off')
+    
+    # Turn off any unused subplots
+    for j in range(i + 1, len(axes.flat)):
+        axes.flat[j].axis('off')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(f"raw_labeled_crop_2D.jpeg", bbox_inches='tight')
+    print("Figure successfully saved.")
