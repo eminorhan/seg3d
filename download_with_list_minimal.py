@@ -2,6 +2,7 @@ import s3fs
 import os
 import time
 import concurrent.futures
+import re 
 
 # --- Configuration ---
 MAX_WORKERS = 8  # Maximum number of simultaneous downloads
@@ -83,7 +84,7 @@ def download_zarr_archive(s3_prefix_path, s3_filesystem, root_dir):
         num = int(nums[-1]) if nums else 0
         return (num, r) 
         
-    # FLIPPED LOGIC: Grab the first element [0] instead of the last [-1]
+    # Grab the first valid recon: [0], optionally choose the last [-1] instead
     best_recon = sorted(list(valid_recons), key=recon_sort_key)[0]
 
     # 3. Discover all EM formats in the chosen reconstruction
