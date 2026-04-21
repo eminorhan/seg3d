@@ -9,6 +9,9 @@ core
 
 # data
 data
+data_oo
+data_oo_filtered
+volumes
 
 # temp files
 *.out

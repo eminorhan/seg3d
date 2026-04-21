@@ -6,7 +6,7 @@ import re
 
 # --- Configuration ---
 MAX_WORKERS = 8  # Maximum number of simultaneous downloads
-MAX_DOWNLOAD_ATTEMPTS = 3  # Maximum number of times to try downloading a single dataset
+MAX_DOWNLOAD_ATTEMPTS = 5  # Maximum number of times to try downloading a single dataset
 BUCKET_NAME = 'janelia-cosem-datasets'
 
 BUCKET_0_100K = [
@@ -34,7 +34,8 @@ BUCKET_1M_10M_0 = [
     'jrc_mus-heart-1', 'jrc_mus-hippocampus-1', 'jrc_mus-kidney-2', 'jrc_mus-kidney-3', 'jrc_mus-kidney', 'jrc_mus-liver-2',
     ]  # 12 (full)
 
-BUCKET_1M_10M_1 = ['jrc_mus-liver-3', 'jrc_mus-liver-4', 'jrc_mus-liver-5', 'jrc_mus-liver-6', 'jrc_mus-liver-7', 'jrc_mus-liver', 
+BUCKET_1M_10M_1 = [
+    'jrc_mus-liver-3', 'jrc_mus-liver-4', 'jrc_mus-liver-5', 'jrc_mus-liver-6', 'jrc_mus-liver-7', 'jrc_mus-liver', 
     'jrc_mus-meissner-corpuscle-1', 'jrc_mus-pancreas-4', 'jrc_mus-salivary-1', 'jrc_mus-skin-1', 'jrc_mus-thymus-1', 'jrc_ut21-1413-003'
     ]  # 12 (full)
 
