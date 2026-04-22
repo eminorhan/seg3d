@@ -12,6 +12,14 @@ LOWER_PERCENTILE = 1.0
 UPPER_PERCENTILE = 99.0                
 TARGET_SIZE = (2048, 2048)
 OUTPUT_DIR = "volumes"
+VOLUMES_TO_BE_INVERTED = [
+    "jrc_ccl81-covid-1", "jrc_fly-acc-calyx-1", "jrc_fly-fsb-1", "jrc_hela-4", "jrc_hela-22",
+    "jrc_hela-h89-1", "jrc_hela-h89-2", "jrc_hela-nz-1", "jrc_hela-nz-2", "jrc_mus-cerebellum-4",
+    "jrc_mus-cerebellum-5", "jrc_mus-cortex-3", "jrc_mus-dorsal-striatum-2", "jrc_mus-dorsal-striatum",
+    "jrc_mus-granule-neurons-1", "jrc_mus-granule-neurons-2", "jrc_mus-granule-neurons-3",
+    "jrc_mus-hippocampus-2", "jrc_mus-hippocampus-3", "jrc_mus-nacc-2", "jrc_mus-nacc-3",
+    "jrc_mus-nacc-4", "jrc_mus-pancreas-3"
+] 
 # -------------------------------------------------------------------------------------------
 
 def get_recon_sort_key(recon_name):
@@ -25,22 +33,18 @@ def get_em_subfolder_sort_key(folder_name):
     elif folder_name.endswith('-int16'): return 3
     return 4
 
-def normalize_to_uint8(slice_2d):
+def normalize_to_uint8(slice_2d, volume_name):
     """Safely casts heterogenous EM arrays to standard 8-bit grayscale with a black background."""
     
     # Drop completely uniform slices early
     if slice_2d.min() == slice_2d.max():
         return None
         
-    # Leave uint8 as is
-    if slice_2d.dtype == np.uint8:
-        return slice_2d
-
     # Convert to float for safe math
     slice_float = slice_2d.astype(np.float32)
     
-    # Identify background padding values
-    bg_black = 0.0
+    # Identify background padding values dynamically
+    bg_black = slice_float.min()
     bg_white = slice_float.max()
     
     # Create a 1D array of only the valid tissue pixels
@@ -63,14 +67,14 @@ def normalize_to_uint8(slice_2d):
     # Normalize the ENTIRE slice (including padding) to 0.0 - 1.0 range
     normalized = np.clip((slice_float - p_low) / (p_high - p_low), 0, 1)
     
-    # # Invert brightness 
-    # if slice_2d.dtype == np.int16:
-    #     normalized = 1.0 - normalized
+    # Invert brightness 
+    if volume_name in VOLUMES_TO_BE_INVERTED:
+        normalized = 1.0 - normalized
     
     # Scale to 255 and cast back to uint8
     return (normalized * 255.0).astype(np.uint8)
 
-def extract_and_preprocess(current_array, axis, slice_idx):
+def extract_and_preprocess(current_array, axis, slice_idx, volume_name):
     """Extracts, crops, normalizes, and resizes a single 2D slice."""
     # 0:Z, 1:Y, 2:X
     if axis == 0:
@@ -84,38 +88,21 @@ def extract_and_preprocess(current_array, axis, slice_idx):
 
     slice_2d = np.array(slice_2d)
 
-    # --- FIRST CROP ---
-    bg_white = slice_2d.max()
-    is_foreground = (slice_2d != 0) & (slice_2d != bg_white)
-    rows = np.any(is_foreground, axis=1)
-    cols = np.any(is_foreground, axis=0)
-    
-    if not np.any(rows):
-        return np.zeros(TARGET_SIZE, dtype=np.uint8) # Fallback to black square
-        
-    rmin, rmax = np.where(rows)[0][[0, -1]]
-    cmin, cmax = np.where(cols)[0][[0, -1]]
-    slice_2d = slice_2d[rmin:rmax+1, cmin:cmax+1]
-
     # --- NORMALIZE ---
-    slice_2d_uint8 = normalize_to_uint8(slice_2d)
-    if slice_2d_uint8 is None:
-        return np.zeros(TARGET_SIZE, dtype=np.uint8)
+    slice_2d_uint8 = normalize_to_uint8(slice_2d, volume_name)
 
-    # --- SECOND CROP ---
+    # --- CROP TO MINIMAL BOUNDING BOX---
     is_foreground = (slice_2d_uint8 != 0) & (slice_2d_uint8 != 255)
     rows = np.any(is_foreground, axis=1)
     cols = np.any(is_foreground, axis=0)
-    
-    if not np.any(rows):
-        return np.zeros(TARGET_SIZE, dtype=np.uint8)
-        
+            
     rmin, rmax = np.where(rows)[0][[0, -1]]
     cmin, cmax = np.where(cols)[0][[0, -1]]
     slice_2d_uint8 = slice_2d_uint8[rmin:rmax+1, cmin:cmax+1]
 
     # --- RESIZE ---
     img = Image.fromarray(slice_2d_uint8).resize(TARGET_SIZE, Image.Resampling.LANCZOS)
+    
     return np.array(img)
 
 def main():
@@ -173,7 +160,7 @@ def main():
         axes = axes.flatten()
 
         for idx, (axis, slice_idx) in enumerate(tasks):
-            processed_img = extract_and_preprocess(current_array, axis, slice_idx)
+            processed_img = extract_and_preprocess(current_array, axis, slice_idx, dataset_name)
             axes[idx].imshow(processed_img, cmap='gray', aspect='auto')
             axes[idx].axis('off') # Remove ticks and borders
 
