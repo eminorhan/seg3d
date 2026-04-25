@@ -11,7 +11,7 @@ core
 data
 data_oo
 data_oo_filtered
-volumes
+data_oo_filtered_more
 
 # temp files
 *.out

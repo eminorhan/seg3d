@@ -48,7 +48,7 @@ def normalize_to_uint8(slice_2d, volume_name):
     bg_white = slice_float.max()
     
     # Create a 1D array of only the valid tissue pixels
-    valid_mask = (slice_float != bg_black) & (slice_float != bg_white)
+    valid_mask = (slice_float != bg_black) & (slice_float != bg_white) & (slice_float != 0.0)
     valid_pixels = slice_float[valid_mask]
     
     # Fallback if the slice is entirely padding
@@ -88,10 +88,24 @@ def extract_and_preprocess(current_array, axis, slice_idx, volume_name):
 
     slice_2d = np.array(slice_2d)
 
+    # --- PRE-CROP TO MINIMAL BOUNDING BOX ---
+    # Find the background values for this specific raw slice
+    bg_min = slice_2d.min()
+    bg_max = slice_2d.max()
+    
+    # Mask out exact min, max, and Zarr zero-padding to find the bounding box
+    is_foreground = (slice_2d != bg_min) & (slice_2d != bg_max) & (slice_2d != 0)
+    rows = np.any(is_foreground, axis=1)
+    cols = np.any(is_foreground, axis=0)
+    
+    rmin, rmax = np.where(rows)[0][[0, -1]]
+    cmin, cmax = np.where(cols)[0][[0, -1]]
+    slice_2d = slice_2d[rmin:rmax+1, cmin:cmax+1]
+    
     # --- NORMALIZE ---
     slice_2d_uint8 = normalize_to_uint8(slice_2d, volume_name)
 
-    # --- CROP TO MINIMAL BOUNDING BOX---
+    # --- POST CROP TO MINIMAL BOUNDING BOX---
     is_foreground = (slice_2d_uint8 != 0) & (slice_2d_uint8 != 255)
     rows = np.any(is_foreground, axis=1)
     cols = np.any(is_foreground, axis=0)
@@ -102,7 +116,7 @@ def extract_and_preprocess(current_array, axis, slice_idx, volume_name):
 
     # --- RESIZE ---
     img = Image.fromarray(slice_2d_uint8).resize(TARGET_SIZE, Image.Resampling.LANCZOS)
-    
+
     return np.array(img)
 
 def main():
