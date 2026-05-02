@@ -10,8 +10,8 @@ core
 # data
 data
 data_oo
-data_oo_filtered
-data_oo_filtered_more
+data_oo_filtered_more_15x
+data_oo_filtered_more_20x
 
 # temp files
 *.out
